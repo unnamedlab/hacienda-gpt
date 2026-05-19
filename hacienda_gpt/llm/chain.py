@@ -10,6 +10,13 @@ from langchain_core.vectorstores import VectorStore
 from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
+# Constants
+TEMPERATURE = 0
+MODEL = "gpt-3.5-turbo"
+FAISS_INDEX_PATH = ".faiss"
+MEMORY_KEY = "chat_history"
+K = 3
+
 from hacienda_gpt.settings import FAISS_INDEX_PATH, MEMORY_KEY, OPENAI_MODEL, OPENAI_TEMPERATURE, TOP_K
 
 def create_system_prompt() -> str:
