@@ -39,6 +39,21 @@ def test_post_turn_contract() -> None:
     assert 'next_questions' in body
 
 
+def test_post_turn_updates_case_tax_period_from_extracted_fact() -> None:
+    created = client.post('/cases', json={'user_id': 'u3', 'jurisdiction': 'ES', 'tax_period': '2025'})
+    case_id = created.json()['case_id']
+
+    turn = client.post(
+        f'/cases/{case_id}/turn',
+        json={'user_input': 'Tengo dudas de IRPF para 2024 y soy residente en España'},
+    )
+    assert turn.status_code == 200
+
+    got = client.get(f'/cases/{case_id}')
+    assert got.status_code == 200
+    assert got.json()['tax_period'] == '2024'
+
+
 def test_not_found_case() -> None:
     r = client.get('/cases/does-not-exist')
     assert r.status_code == 404
