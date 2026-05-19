@@ -1,14 +1,14 @@
 import textwrap
 
 from langchain.chains import ConversationalRetrievalChain
-from langchain.chat_models import ChatOpenAI
-from langchain.embeddings import OpenAIEmbeddings
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
 from langchain.prompts.chat import SystemMessagePromptTemplate
 from langchain.retrievers.document_compressors import EmbeddingsFilter
 from langchain.retrievers.multi_query import MultiQueryRetriever
-from langchain.vectorstores import FAISS, VectorStore
+from langchain_core.vectorstores import VectorStore
+from langchain_community.vectorstores import FAISS
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 # Constants
 TEMPERATURE = 0
@@ -55,7 +55,7 @@ def create_system_prompt() -> str:
 
 def _create_retriever(embeddings: OpenAIEmbeddings, llm) -> VectorStore:
     """Loads and returns a FAISS retriever."""
-    faiss = FAISS.load_local(FAISS_INDEX_PATH, embeddings)
+    faiss = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
     EmbeddingsFilter(embeddings=embeddings, similarity_threshold=0.8)
     return MultiQueryRetriever.from_llm(retriever=faiss.as_retriever(search_kwargs={"k": K}), llm=llm)
 
@@ -75,7 +75,7 @@ def create_openai_chain(openai_api_key: str) -> ConversationalRetrievalChain:
     llm = ChatOpenAI(temperature=TEMPERATURE, model=MODEL, openai_api_key=openai_api_key)
 
     # Load retriever and memory
-    embeddings = OpenAIEmbeddings()
+    embeddings = OpenAIEmbeddings(api_key=openai_api_key)
     retriever = _create_retriever(embeddings, llm)
     memory = _create_memory()
 
