@@ -4,18 +4,12 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
 from langchain.prompts.chat import SystemMessagePromptTemplate
+from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import EmbeddingsFilter
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain_core.vectorstores import VectorStore
 from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-
-# Constants
-TEMPERATURE = 0
-MODEL = "gpt-3.5-turbo"
-FAISS_INDEX_PATH = ".faiss"
-MEMORY_KEY = "chat_history"
-K = 3
 
 from hacienda_gpt.settings import FAISS_INDEX_PATH, MEMORY_KEY, OPENAI_MODEL, OPENAI_TEMPERATURE, TOP_K
 
@@ -57,8 +51,10 @@ def create_system_prompt() -> str:
 def _create_retriever(embeddings: OpenAIEmbeddings, llm) -> VectorStore:
     """Loads and returns a FAISS retriever."""
     faiss = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
-    EmbeddingsFilter(embeddings=embeddings, similarity_threshold=0.8)
-    return MultiQueryRetriever.from_llm(retriever=faiss.as_retriever(search_kwargs={"k": TOP_K}), llm=llm)
+    base_retriever = faiss.as_retriever(search_kwargs={"k": TOP_K})
+    multi_query_retriever = MultiQueryRetriever.from_llm(retriever=base_retriever, llm=llm)
+    embeddings_filter = EmbeddingsFilter(embeddings=embeddings, similarity_threshold=0.8)
+    return ContextualCompressionRetriever(base_retriever=multi_query_retriever, base_compressor=embeddings_filter)
 
 
 def _create_memory() -> ConversationBufferWindowMemory:
