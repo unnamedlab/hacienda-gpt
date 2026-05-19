@@ -1,22 +1,16 @@
 import textwrap
 
 from langchain.chains import ConversationalRetrievalChain
-from langchain.chat_models import ChatOpenAI
-from langchain.embeddings import OpenAIEmbeddings
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
 from langchain.prompts.chat import SystemMessagePromptTemplate
 from langchain.retrievers.document_compressors import EmbeddingsFilter
 from langchain.retrievers.multi_query import MultiQueryRetriever
-from langchain.vectorstores import FAISS, VectorStore
+from langchain_core.vectorstores import VectorStore
+from langchain_community.vectorstores import FAISS
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-# Constants
-TEMPERATURE = 0
-MODEL = "gpt-3.5-turbo"
-FAISS_INDEX_PATH = ".faiss"
-MEMORY_KEY = "chat_history"
-K = 3
-
+from hacienda_gpt.settings import FAISS_INDEX_PATH, MEMORY_KEY, OPENAI_MODEL, OPENAI_TEMPERATURE, TOP_K
 
 def create_system_prompt() -> str:
     template = """
@@ -55,14 +49,14 @@ def create_system_prompt() -> str:
 
 def _create_retriever(embeddings: OpenAIEmbeddings, llm) -> VectorStore:
     """Loads and returns a FAISS retriever."""
-    faiss = FAISS.load_local(FAISS_INDEX_PATH, embeddings)
+    faiss = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
     EmbeddingsFilter(embeddings=embeddings, similarity_threshold=0.8)
-    return MultiQueryRetriever.from_llm(retriever=faiss.as_retriever(search_kwargs={"k": K}), llm=llm)
+    return MultiQueryRetriever.from_llm(retriever=faiss.as_retriever(search_kwargs={"k": TOP_K}), llm=llm)
 
 
 def _create_memory() -> ConversationBufferWindowMemory:
     """Loads and returns a ConversationBufferWindowMemory object."""
-    return ConversationBufferWindowMemory(k=K, memory_key=MEMORY_KEY)
+    return ConversationBufferWindowMemory(k=TOP_K, memory_key=MEMORY_KEY)
 
 
 def create_openai_chain(openai_api_key: str) -> ConversationalRetrievalChain:
@@ -72,10 +66,10 @@ def create_openai_chain(openai_api_key: str) -> ConversationalRetrievalChain:
     """
 
     # Initialize chat model and embeddings
-    llm = ChatOpenAI(temperature=TEMPERATURE, model=MODEL, openai_api_key=openai_api_key)
+    llm = ChatOpenAI(temperature=OPENAI_TEMPERATURE, model=OPENAI_MODEL, openai_api_key=openai_api_key)
 
     # Load retriever and memory
-    embeddings = OpenAIEmbeddings()
+    embeddings = OpenAIEmbeddings(api_key=openai_api_key)
     retriever = _create_retriever(embeddings, llm)
     memory = _create_memory()
 

@@ -1,14 +1,8 @@
-import pathlib
-import sys
 import time
 
 import streamlit as st
-
-# Solve importing local modules in streamlit
-sys.path.append(str(pathlib.Path().absolute()).split("/hacienda_gpt")[0] + "/hacienda_gpt")
-
-from llm.chain import create_openai_chain
-from utils import configure_logging, get_openai_api_key
+from hacienda_gpt.llm.chain import create_openai_chain
+from hacienda_gpt.utils import MissingOpenAIAPIKeyError, configure_logging, get_openai_api_key
 
 # Custom image for the app icon and the assistant's avatar
 bot_logo = "https://sede.agenciatributaria.gob.es/static_files/Sede/Tema/Agencia_tributaria/Memorias/2018/Imagenes/Introduccion.jpg"
@@ -16,7 +10,11 @@ bot_logo = "https://sede.agenciatributaria.gob.es/static_files/Sede/Tema/Agencia
 
 @st.cache_resource
 def load_chain():
-    openai_api_key = get_openai_api_key()
+    try:
+        openai_api_key = get_openai_api_key()
+    except MissingOpenAIAPIKeyError:
+        st.error("Falta OPENAI_API_KEY en el entorno. Configúrala para usar HaciendaGPT.")
+        st.stop()
     return create_openai_chain(openai_api_key=openai_api_key)
 
 

@@ -89,7 +89,7 @@ class AgenciaTributariaPDFCrawler(scrapy.Spider):
         le = LinkExtractor()
         for link in le.extract_links(response):
             yield {"file_urls": [link.url], "path": self.folder}
-        self._follow_domain_links(response)
+        yield from self._follow_domain_links(response)
 
     def _follow_domain_links(self, response):
         domain = self._extract_domain_from_start_url()

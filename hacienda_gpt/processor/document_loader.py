@@ -1,11 +1,12 @@
 import logging
 
-from langchain.docstore.document import Document
-from langchain.document_loaders import DirectoryLoader
-from langchain.embeddings import GPT4AllEmbeddings, OpenAIEmbeddings
-from langchain.schema.embeddings import Embeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from langchain_community.document_loaders import DirectoryLoader
+from langchain_community.embeddings import GPT4AllEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from hacienda_gpt.utils import get_openai_api_key
 
@@ -13,7 +14,7 @@ from hacienda_gpt.utils import get_openai_api_key
 class DocumentProcessor:
     def __init__(
         self,
-        embeddings: type[Embeddings],
+        embeddings: Embeddings,
         content_dir: str,
         output_dir: str,
         chunk_size: int = 1000,
@@ -44,7 +45,7 @@ class DocumentProcessor:
 
 
 def process_with_openai(args: dict) -> None:
-    processor = DocumentProcessor(OpenAIEmbeddings(get_openai_api_key()), **args)
+    processor = DocumentProcessor(OpenAIEmbeddings(api_key=get_openai_api_key()), **args)
     processor.process_documents()
 
 
