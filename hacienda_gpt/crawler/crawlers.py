@@ -81,17 +81,20 @@ class AgenciaTributariaPDFCrawler(scrapy.Spider):
     name = "AgenciaTributariaPDFCrawler"
     start_urls = ["https://agenciatributaria.gob.es/"]
 
-    def __init__(self, folder=None, *args, **kwargs):
+    def __init__(self, folder: str | None = None, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.folder = folder
 
-    def parse(self, response):
+    def parse(self, response: Response) -> Generator[dict[str, list[str] | str] | scrapy.Request, None, None]:
         le = LinkExtractor()
         for link in le.extract_links(response):
             yield {"file_urls": [link.url], "path": self.folder}
         yield from self._follow_domain_links(response)
 
-    def _follow_domain_links(self, response):
+    def _extract_domain_from_start_url(self) -> str:
+        return urlparse(self.start_urls[0]).netloc
+
+    def _follow_domain_links(self, response: Response) -> Generator[scrapy.Request, None, None]:
         domain = self._extract_domain_from_start_url()
         link_extractor = LinkExtractor(allow_domains=[domain])
         for link in link_extractor.extract_links(response):
