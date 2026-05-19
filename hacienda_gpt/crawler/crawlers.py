@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from datetime import UTC, datetime
 import hashlib
 import os
 import re
@@ -15,14 +16,31 @@ from scrapy_playwright.page import PageMethod
 class AgenciaTributariaWebCrawler(scrapy.Spider):
     name = "AgenciaTributariaWebCrawler"
     urls = [
-        "https://sede.agenciatributaria.gob.es/Sede/ayuda/manuales-videos-folletos/manuales-practicos/irpf-2022/numero-identificacion-publicacion.html"
+        "https://sede.agenciatributaria.gob.es/",
+        "https://sede.agenciatributaria.gob.es/Sede/irpf.html",
+        "https://sede.agenciatributaria.gob.es/Sede/iva.html",
+        "https://sede.agenciatributaria.gob.es/Sede/censos-nif-domicilio-fiscal.html",
+        "https://sede.agenciatributaria.gob.es/Sede/colaborar-agencia-tributaria/modelos-100-199.html",
+        "https://sede.agenciatributaria.gob.es/Sede/recaudacion/aplazamientos-fraccionamientos-deudas-tributarias.html",
+        "https://sede.agenciatributaria.gob.es/Sede/colaborar-agencia-tributaria/calendario-contribuyente.html",
+        "https://sede.agenciatributaria.gob.es/Sede/ayuda/manuales-videos-folletos/manuales-practicos.html",
     ]
-    allowed_paths = [r"/Sede/ayuda/manuales-videos-folletos/manuales-practicos/irpf-2022/"]
+    allowed_paths = [
+        r"/Sede/irpf",
+        r"/Sede/iva",
+        r"/Sede/censos-nif-domicilio-fiscal",
+        r"/Sede/colaborar-agencia-tributaria/modelos",
+        r"/Sede/recaudacion/aplazamientos-fraccionamientos-deudas-tributarias",
+        r"/Sede/colaborar-agencia-tributaria/calendario-contribuyente",
+        r"/Sede/ayuda/manuales-videos-folletos",
+        r"/Sede/informacion-administrativa/sanciones",
+    ]
 
-    def __init__(self, folder: str = None, mode: str = "flat", *args: Any, **kwargs: Any) -> None:
+    def __init__(self, folder: str = "./data/html", mode: str = "flat", *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.folder: str = folder
-        self.mode: str = mode
+        snapshot_date = kwargs.get("snapshot_date") or datetime.now(UTC).strftime("%Y-%m-%d")
+        self.folder = os.path.join(folder, snapshot_date)
+        self.mode = mode
         self.allowed_patterns: list[re.Pattern] = [re.compile(path) for path in self.allowed_paths]
         self._ensure_folder_exists()
 
@@ -39,11 +57,7 @@ class AgenciaTributariaWebCrawler(scrapy.Spider):
 
     def _get_page_methods(self, url: str) -> list[PageMethod]:
         return [
-            PageMethod("wait_for_selector", "div#indice-modal nav"),
-            PageMethod(
-                "wait_for_function",
-                expression="() => Array.from($('div#indice-modal nav a')).filter(el => el.href === '#').length === 0",
-            ),
+            PageMethod("wait_for_load_state", "networkidle"),
             PageMethod("screenshot", path=self._generate_screenshot_path(url), full_page=True),
         ]
 
@@ -51,13 +65,12 @@ class AgenciaTributariaWebCrawler(scrapy.Spider):
         os.makedirs(self.folder, exist_ok=True)
 
     def _save_response_to_file(self, response: Response) -> None:
-        with open(self._generate_file_path(response), "wb") as f:
-            f.write(response.body)
+        with open(self._generate_file_path(response), "wb") as file_pointer:
+            file_pointer.write(response.body)
 
     def _follow_domain_links(self, response: Response) -> Generator[scrapy.Request, None, None]:
-        link_extractor = LinkExtractor(allow=self.allowed_patterns)
-        links = link_extractor.extract_links(response)
-        for link in links:
+        link_extractor = LinkExtractor(allow=self.allowed_patterns, allow_domains=["sede.agenciatributaria.gob.es"])
+        for link in link_extractor.extract_links(response):
             yield scrapy.Request(url=link.url, meta=self._get_meta_for_request(link.url), callback=self.parse)
 
     def _generate_screenshot_path(self, url: str) -> str:
@@ -79,23 +92,43 @@ class AgenciaTributariaWebCrawler(scrapy.Spider):
 
 class AgenciaTributariaPDFCrawler(scrapy.Spider):
     name = "AgenciaTributariaPDFCrawler"
-    start_urls = ["https://agenciatributaria.gob.es/"]
+    start_urls = ["https://sede.agenciatributaria.gob.es/"]
 
     def __init__(self, folder: str | None = None, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.folder = folder
+        snapshot_date = kwargs.get("snapshot_date") or datetime.now(UTC).strftime("%Y-%m-%d")
+        base_folder = folder or "./data/pdf"
+        self.folder = os.path.join(base_folder, snapshot_date)
+        self.seen_urls: set[str] = set()
+        self.seen_content_hashes: set[str] = set()
 
     def parse(self, response: Response) -> Generator[dict[str, list[str] | str] | scrapy.Request, None, None]:
-        le = LinkExtractor()
-        for link in le.extract_links(response):
-            yield {"file_urls": [link.url], "path": self.folder}
-        yield from self._follow_domain_links(response)
+        self.seen_urls.add(response.url)
+        extractor = LinkExtractor(allow_domains=[self._extract_domain_from_start_url()], unique=True)
+        for link in extractor.extract_links(response):
+            if link.url in self.seen_urls:
+                continue
+            if self._is_pdf_url(link.url):
+                yield scrapy.Request(link.url, callback=self.parse_pdf)
+            else:
+                self.seen_urls.add(link.url)
+                yield scrapy.Request(link.url, callback=self.parse)
+
+    def parse_pdf(self, response: Response) -> Generator[dict[str, list[str] | str], None, None]:
+        if not self._is_pdf_response(response):
+            return
+        content_hash = hashlib.sha256(response.body).hexdigest()
+        if content_hash in self.seen_content_hashes:
+            return
+        self.seen_content_hashes.add(content_hash)
+        yield {"file_urls": [response.url], "path": self.folder}
+
+    def _is_pdf_url(self, url: str) -> bool:
+        return url.lower().endswith(".pdf")
+
+    def _is_pdf_response(self, response: Response) -> bool:
+        content_type = response.headers.get("Content-Type", b"").decode("utf-8", errors="ignore").lower()
+        return "application/pdf" in content_type or self._is_pdf_url(response.url)
 
     def _extract_domain_from_start_url(self) -> str:
         return urlparse(self.start_urls[0]).netloc
-
-    def _follow_domain_links(self, response: Response) -> Generator[scrapy.Request, None, None]:
-        domain = self._extract_domain_from_start_url()
-        link_extractor = LinkExtractor(allow_domains=[domain])
-        for link in link_extractor.extract_links(response):
-            yield scrapy.Request(link.url, callback=self.parse)
