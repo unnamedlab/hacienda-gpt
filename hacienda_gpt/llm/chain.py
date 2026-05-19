@@ -11,7 +11,13 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-from hacienda_gpt.settings import FAISS_INDEX_PATH, OPENAI_MODEL, OPENAI_TEMPERATURE, TOP_K
+from hacienda_gpt.settings import (
+    FAISS_INDEX_PATH,
+    FAISS_TRUSTED_INDEX,
+    OPENAI_MODEL,
+    OPENAI_TEMPERATURE,
+    TOP_K,
+)
 
 
 def create_system_prompt() -> str:
@@ -34,7 +40,7 @@ def create_system_prompt() -> str:
 
     <context>
         {context}
-    <context/>
+    </context>
 
     Abajo se proporciona una pregunta entre los bloques <question></question>. Utiliza la información proporcionada en <context></context> para responder a la pregunta.
 
@@ -51,6 +57,12 @@ def create_system_prompt() -> str:
 
 def _create_retriever(embeddings: OpenAIEmbeddings, llm: ChatOpenAI) -> BaseRetriever:
     """Load and return a compressed FAISS retriever."""
+    if not FAISS_TRUSTED_INDEX:
+        raise RuntimeError(
+            "Refusing to load FAISS index with dangerous deserialization. "
+            "Set FAISS_TRUSTED_INDEX=true only for trusted local indexes."
+        )
+
     faiss = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
     base_retriever = faiss.as_retriever(search_kwargs={"k": TOP_K})
     multi_query_retriever = MultiQueryRetriever.from_llm(retriever=base_retriever, llm=llm)
