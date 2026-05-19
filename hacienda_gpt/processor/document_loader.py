@@ -14,7 +14,7 @@ from hacienda_gpt.utils import get_openai_api_key
 class DocumentProcessor:
     def __init__(
         self,
-        embeddings: type[Embeddings],
+        embeddings: Embeddings,
         content_dir: str,
         output_dir: str,
         chunk_size: int = 1000,
