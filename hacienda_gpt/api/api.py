@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from hacienda_gpt.decision.audit import build_recommendation_audit_event
@@ -17,7 +18,17 @@ from hacienda_gpt.decision.state_store_sqlite import SQLiteCaseStateStore
 from hacienda_gpt.decision.taxonomy import SupportedIntent
 
 app = FastAPI(title="HaciendaGPT Decision API", version="1.0.0")
-store = SQLiteCaseStateStore(str(Path("./data/api_case_state.sqlite3")))
+
+
+def get_case_store() -> SQLiteCaseStateStore:
+    return SQLiteCaseStateStore(str(Path("./data/api_case_state.sqlite3")))
+
+
+def _resolve_tax_period(case: CaseState, facts: list[Fact]) -> str:
+    period_fact = next((fact for fact in facts if fact.name == "periodo_fiscal"), None)
+    if period_fact is None:
+        return case.tax_period
+    return str(period_fact.value)
 
 
 class CreateCaseRequest(BaseModel):
@@ -50,7 +61,10 @@ def health() -> dict[str, str]:
 
 
 @app.post("/cases", response_model=CaseState)
-def create_case(payload: CreateCaseRequest) -> CaseState:
+def create_case(
+    payload: CreateCaseRequest,
+    store: Annotated[SQLiteCaseStateStore, Depends(get_case_store)],
+) -> CaseState:
     now = datetime.now(UTC)
     case = CaseState(
         case_id=f"case_{uuid4().hex}",
@@ -66,7 +80,10 @@ def create_case(payload: CreateCaseRequest) -> CaseState:
 
 
 @app.get("/cases/{case_id}", response_model=CaseState)
-def get_case(case_id: str) -> CaseState:
+def get_case(
+    case_id: str,
+    store: Annotated[SQLiteCaseStateStore, Depends(get_case_store)],
+) -> CaseState:
     case = store.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
@@ -74,7 +91,10 @@ def get_case(case_id: str) -> CaseState:
 
 
 @app.get("/cases/{case_id}/audit")
-def get_case_audit(case_id: str) -> dict:
+def get_case_audit(
+    case_id: str,
+    store: Annotated[SQLiteCaseStateStore, Depends(get_case_store)],
+) -> dict:
     case = store.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
@@ -82,17 +102,24 @@ def get_case_audit(case_id: str) -> dict:
 
 
 @app.post("/cases/{case_id}/turn", response_model=TurnResponse)
-def post_turn(case_id: str, payload: TurnRequest) -> TurnResponse:
+def post_turn(
+    case_id: str,
+    payload: TurnRequest,
+    store: Annotated[SQLiteCaseStateStore, Depends(get_case_store)],
+) -> TurnResponse:
     case = store.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
 
     interpretation = interpret_turn(payload.user_input, chat_history=[], current_case_state=case)
-    rules_result = evaluate_rules(case_state=case, recent_facts=interpretation.extracted_facts)
+    effective_tax_period = _resolve_tax_period(case, interpretation.extracted_facts)
+    case_for_rules = case.model_copy(update={"tax_period": effective_tax_period})
+    rules_result = evaluate_rules(case_state=case_for_rules, recent_facts=interpretation.extracted_facts)
 
     updated = case.model_copy(
         update={
             "facts": interpretation.extracted_facts,
+            "tax_period": effective_tax_period,
             "missing_facts": interpretation.missing_facts,
             "obligation_candidates": rules_result.candidate_obligations,
             "updated_at": datetime.now(UTC),
@@ -132,7 +159,10 @@ def post_turn(case_id: str, payload: TurnRequest) -> TurnResponse:
 
 
 @app.get("/cases/{case_id}/audit/export")
-def export_case_audit(case_id: str) -> dict:
+def export_case_audit(
+    case_id: str,
+    store: Annotated[SQLiteCaseStateStore, Depends(get_case_store)],
+) -> dict:
     case = store.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
