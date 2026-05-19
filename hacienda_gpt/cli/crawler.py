@@ -13,6 +13,8 @@ from hacienda_gpt.crawler.crawlers import (
 CRAWLER_MAPPING: dict[str, type[Spider]] = {"web": AgenciaTributariaWebCrawler, "pdf": AgenciaTributariaPDFCrawler}
 
 SETTINGS = {
+    "ROBOTSTXT_OBEY": True,
+    "HTTPCACHE_ENABLED": True,
     "DOWNLOADER_MIDDLEWARES": {
         "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
         "scrapy.downloadermiddlewares.retry.RetryMiddleware": None,
@@ -31,21 +33,24 @@ SETTINGS = {
 }
 
 
-def start_crawler(crawler_class: type[Spider], settings: dict[str, Any], folder: str, mode: str) -> None:
+def start_crawler(
+    crawler_class: type[Spider], settings: dict[str, Any], folder: str, mode: str, snapshot_date: str | None
+) -> None:
     process = CrawlerProcess(settings=settings)
-    process.crawl(crawler_class, folder=os.path.abspath(folder), mode=mode)
+    process.crawl(crawler_class, folder=os.path.abspath(folder), mode=mode, snapshot_date=snapshot_date)
     process.start(install_signal_handlers=True)
 
 
 @click.command()
 @click.option("--folder", default="./data/html", help="Folder to store files")
-@click.option("--depth", default=0, help="Max depth to crawl. 0 for unlimited depth")
+@click.option("--depth", default=1, help="Max depth to crawl. 0 for unlimited depth")
 @click.option("--crawler", type=click.Choice(["web", "pdf"]), default="web", help="Type of crawler to use")
 @click.option("--mode", default="flat", help="File storage mode. Can be 'flat' or other modes")
-def cli(folder: str, depth: int, crawler: str, mode: str) -> None:
+@click.option("--snapshot-date", default=None, help="Snapshot date folder name (YYYY-MM-DD)")
+def cli(folder: str, depth: int, crawler: str, mode: str, snapshot_date: str | None) -> None:
     settings = {**SETTINGS, **{"DEPTH_LIMIT": depth}}
     crawler_class = CRAWLER_MAPPING[crawler]
-    start_crawler(crawler_class, settings, folder, mode)
+    start_crawler(crawler_class, settings, folder, mode, snapshot_date)
 
 
 if __name__ == "__main__":

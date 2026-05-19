@@ -1,22 +1,23 @@
 import textwrap
 
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferWindowMemory
-from langchain.prompts import PromptTemplate
-from langchain.prompts.chat import SystemMessagePromptTemplate
+from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import EmbeddingsFilter
 from langchain.retrievers.multi_query import MultiQueryRetriever
-from langchain_core.vectorstores import VectorStore
 from langchain_community.vectorstores import FAISS
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-from hacienda_gpt.settings import FAISS_INDEX_PATH, MEMORY_KEY, OPENAI_MODEL, OPENAI_TEMPERATURE, TOP_K
+from hacienda_gpt.settings import FAISS_INDEX_PATH, OPENAI_MODEL, OPENAI_TEMPERATURE, TOP_K
+
 
 def create_system_prompt() -> str:
     template = """
     Eres un profesional y experto asistente inteligente especializado en responder preguntas relacionadas con la Agencia Tributaria de España.
-    
+
     1. Evita cualquier construcción de lenguaje que pueda interpretarse como expresión de remordimiento, disculpa u arrepentimiento.\
     2. Mantén las respuestas únicas y libres de repetición.\
     3. Descompón problemas o tareas complejas en pasos más pequeños y explica cada uno usando razonamiento.\
@@ -38,7 +39,7 @@ def create_system_prompt() -> str:
     Abajo se proporciona una pregunta entre los bloques <question></question>. Utiliza la información proporcionada en <context></context> para responder a la pregunta.
 
     <question>
-        {question}
+        {input}
     </question>
 
     RECUERDA: Si no hay información relevante dentro de <context></context>, simplemente di "Hmm, no estoy seguro". No intentes inventar una respuesta.\
@@ -48,8 +49,8 @@ def create_system_prompt() -> str:
     return textwrap.dedent(template)
 
 
-def _create_retriever(embeddings: OpenAIEmbeddings, llm) -> VectorStore:
-    """Loads and returns a FAISS retriever."""
+def _create_retriever(embeddings: OpenAIEmbeddings, llm: ChatOpenAI) -> BaseRetriever:
+    """Load and return a compressed FAISS retriever."""
     faiss = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
     base_retriever = faiss.as_retriever(search_kwargs={"k": TOP_K})
     multi_query_retriever = MultiQueryRetriever.from_llm(retriever=base_retriever, llm=llm)
@@ -57,32 +58,27 @@ def _create_retriever(embeddings: OpenAIEmbeddings, llm) -> VectorStore:
     return ContextualCompressionRetriever(base_retriever=multi_query_retriever, base_compressor=embeddings_filter)
 
 
-def _create_memory() -> ConversationBufferWindowMemory:
-    """Loads and returns a ConversationBufferWindowMemory object."""
-    return ConversationBufferWindowMemory(k=TOP_K, memory_key=MEMORY_KEY)
-
-
-def create_openai_chain(openai_api_key: str) -> ConversationalRetrievalChain:
-    """
-    Initializes and configures a conversational retrieval chain for answering user questions.
-    :return: ConversationalRetrievalChain object.
-    """
-
-    # Initialize chat model and embeddings
-    llm = ChatOpenAI(temperature=OPENAI_TEMPERATURE, model=OPENAI_MODEL, openai_api_key=openai_api_key)
-
-    # Load retriever and memory
+def create_openai_chain(openai_api_key: str) -> Runnable:
+    """Create a retrieval chain using the stable Runnable/LCEL architecture."""
+    llm = ChatOpenAI(temperature=OPENAI_TEMPERATURE, model=OPENAI_MODEL, api_key=openai_api_key)
     embeddings = OpenAIEmbeddings(api_key=openai_api_key)
     retriever = _create_retriever(embeddings, llm)
-    memory = _create_memory()
 
-    # Initialize ConversationalRetrievalChain
-    chain = ConversationalRetrievalChain.from_llm(
-        llm=llm, retriever=retriever, memory=memory, get_chat_history=lambda h: h, verbose=True
+    contextualize_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", "Reformula la última consulta del usuario para buscar documentos relevantes."),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ]
     )
+    history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_prompt)
 
-    # Update the system prompt
-    system_prompt = PromptTemplate(input_variables=["context", "question"], template=create_system_prompt())
-    chain.combine_docs_chain.llm_chain.prompt.messages[0] = SystemMessagePromptTemplate(prompt=system_prompt)
-
-    return chain
+    qa_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", create_system_prompt()),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ]
+    )
+    qa_chain = create_stuff_documents_chain(llm, qa_prompt)
+    return create_retrieval_chain(history_aware_retriever, qa_chain)
