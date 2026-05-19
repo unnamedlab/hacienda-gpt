@@ -25,6 +25,8 @@ export TOP_K="3"
 export FAISS_INDEX_PATH="./data/faiss"
 # Seguridad: solo activar si el índice FAISS proviene de una fuente 100% confiable
 export FAISS_TRUSTED_INDEX="true"
+export DECISION_DEBUG_MODE="false"
+export DECISION_STATE_DB_PATH="./data/decision_state.sqlite3"
 ```
 
 ## 1) Crawling de contenidos
@@ -79,3 +81,9 @@ La evaluación genera:
 - El proyecto usa `FAISS.load_local(..., allow_dangerous_deserialization=True)` por compatibilidad con índices serializados por LangChain/FAISS.
 - Para reducir riesgo, la carga ahora está protegida por `FAISS_TRUSTED_INDEX`; si no está en `true`, la app rechaza cargar el índice.
 - Activa `FAISS_TRUSTED_INDEX=true` **solo** con índices creados por ti o por una fuente plenamente confiable en un entorno controlado.
+
+
+## Modo debug de CaseState
+
+Si activas `DECISION_DEBUG_MODE=true`, la UI mostrará en un expander los `facts` detectados y los `facts` faltantes por turno.
+El estado de cada sesión se persiste en SQLite usando `DECISION_STATE_DB_PATH`.

@@ -37,4 +37,5 @@ def test_create_retriever_builds_compressed_retriever(monkeypatch: pytest.Monkey
         base_retriever=fake_multi_query_retriever,
         base_compressor=fake_embeddings_filter,
     )
-    assert result is fake_compressed_retriever
+    assert hasattr(result, "inner")
+    assert result.inner is fake_compressed_retriever
